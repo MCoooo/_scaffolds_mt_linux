@@ -1,0 +1,6 @@
+* -text
+*.lib binary
+*.dll binary
+*.exe binary
+*.png binary
+*.ico binary
