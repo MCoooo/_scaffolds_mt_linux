@@ -19,11 +19,12 @@ sudo apt-get install -y wl-clipboard   # WSLg / Wayland sessions (check: echo $W
 sudo apt-get install -y xclip          # plain X11 sessions
 ```
 
-Only needed for `hm_mt_cimgui` (cimgui + GLFW + OpenGL3 GUI) — every other
-type builds fine without these. `vendor/cimgui`/`vendor/glfw`'s `.a`s are
-prebuilt and committed, but the X11/GL/Wayland *client* libs they link
-against at build time still have to exist on your machine (the `-dev`
-packages provide the unversioned `.so` symlinks the linker needs):
+Only needed for `hm_mt_cimgui` (cimgui + GLFW + OpenGL3 GUI) and
+`hm_mt_raylib` (raylib) — every other type builds fine without these.
+`vendor/{cimgui,glfw,raylib}`'s `.a`s are prebuilt and committed, but the
+X11/GL/Wayland *client* libs they link against at build time still have to
+exist on your machine (the `-dev` packages provide the unversioned `.so`
+symlinks the linker needs):
 
 ```sh
 sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
@@ -31,8 +32,10 @@ sudo apt-get install -y libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
 ```
 
 `cmake`/`g++` are **not** needed for this — only if you want to rebuild
-`vendor/build_vendor.sh` yourself (new cimgui/GLFW version, etc.); the
-committed `.a`s already cover normal use.
+`vendor/build_vendor.sh` yourself (new cimgui/GLFW/raylib version, etc.);
+the committed `.a`s already cover normal use. (`hm_mt_raylib`'s vendor
+build only needs `make`/`gcc`, not `cmake`/`g++` — raylib builds itself via
+its own plain Makefile.)
 
 Git identity, if you haven't set one on this machine yet (needed for the
 `git commit` step `new-cproject` runs at the end of scaffolding — it warns
@@ -129,22 +132,26 @@ cd .. && rm -rf tmp/hello
 Should print a demo run (arenas, strings, json/toml/ini, threads, files,
 logging) and end with `done.`.
 
-If you installed the `hm_mt_cimgui` prereqs above, also verify that builds
-(needs a `DISPLAY`/`WAYLAND_DISPLAY` to actually open a window — WSLg
-provides one out of the box; skip `make run` on a headless machine, `make`
-alone is enough to confirm the link succeeds):
+If you installed the `hm_mt_cimgui`/`hm_mt_raylib` prereqs above, also
+verify that builds (needs a `DISPLAY`/`WAYLAND_DISPLAY` to actually open a
+window — WSLg provides one out of the box; skip `make run` on a headless
+machine, `make` alone is enough to confirm the link succeeds):
 
 ```sh
 cd ~/dev/c_lang/tmp
 new-cproject hm_mt_cimgui hello_gui --demo
 make        # builds; add `run` too if you have a display
 cd .. && rm -rf tmp/hello_gui
+
+new-cproject hm_mt_raylib hello_raylib --demo
+make        # builds; add `run` too if you have a display
+cd .. && rm -rf tmp/hello_raylib
 ```
 
 ## Usage
 
 ```sh
-new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui> <name> [--use-env] [--demo]
+new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui|hm_mt_raylib> <name> [--use-env] [--demo]
 new-cproject --types   # list active types, one per line, and exit
 # aliases: cproj, cj
 ```
@@ -154,9 +161,9 @@ new-cproject --types   # list active types, one per line, and exit
 - `--use-env` — reference `$HMCOREMT_ROOT/src` live instead of copying it
   into `src/_hm_core/`; upstream core changes are picked up on next rebuild
   (no re-run needed). Without it, the project gets a frozen snapshot.
-  `hm_mt_cimgui`'s `vendor/` (cimgui + GLFW) is unaffected either way — it's
-  always copied into the project, since it's the scaffold's own vendored
-  dependency, not hm_core.
+  `hm_mt_cimgui`'s `vendor/` (cimgui + GLFW) and `hm_mt_raylib`'s `vendor/`
+  (raylib) are unaffected either way — always copied into the project,
+  since they're the scaffold's own vendored dependency, not hm_core.
 
 Inside a generated project: `make` / `make debug` / `make run` / `make clean`.
 
@@ -174,11 +181,12 @@ Windows' `Update-ClangD`.
 
 ## Known gaps
 
-- `hm_mt` (console), `hm_mt_tui` (terminal UI), and `hm_mt_cimgui` (cimgui +
-  GLFW + OpenGL3 GUI) exist. hm_core's own native GUI stack
-  (`draw`/`render`/`ui`/`window_manager`) isn't ported to Linux — see this
-  repo's `CLAUDE.md` "Not ported yet" section. `hm_mt_cimgui` doesn't touch
-  that stack at all, so it isn't blocked on it.
+- `hm_mt` (console), `hm_mt_tui` (terminal UI), `hm_mt_cimgui` (cimgui +
+  GLFW + OpenGL3 GUI), and `hm_mt_raylib` (raylib GUI) exist. hm_core's own
+  native GUI stack (`draw`/`render`/`ui`/`window_manager`) isn't ported to
+  Linux — see this repo's `CLAUDE.md` "Not ported yet" section. Neither
+  `hm_mt_cimgui` nor `hm_mt_raylib` touch that stack at all (each drives
+  its own window/render loop), so neither is blocked on it.
 - `make debug`/`make` both work but there's no `compile_commands.json`
   generation step yet (the `.clangd` generated at project-creation time,
   see above, is what `clangd` actually uses — this is sufficient, just

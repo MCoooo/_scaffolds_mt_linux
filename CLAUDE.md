@@ -35,6 +35,15 @@ standalone script — see "Why a function, not a script" below).
   libs + headers, built via `vendor/build_vendor.sh` (self-cleaning —
   clones GLFW+cimgui source into a scratch dir and deletes it after
   building).
+- `hm_mt_raylib/` — raylib 6.x (static) GUI scaffold. Same "drives its own
+  window/render loop, borrows only base/os/ext/log" pattern as
+  `hm_mt_cimgui`, but simpler: raylib bundles its own GLFW-equivalent
+  (`rglfw`) internally, so there's a single vendor lib (`vendor/raylib`,
+  built via `vendor/build_vendor.sh` from raylib's own plain `Makefile`, no
+  cmake/g++ needed). No Win32-style header conflicts exist on Linux (that's
+  a `<windows.h>` problem, absent here) — the only real clash is hm_core's
+  `Clamp` macro vs raymath's `Clamp` function, undef'd in `main.c`/
+  `main_stub.c` before `raylib.h`.
 - `new-cproject.sh` — the project generator; also installable as
   `~/.bash_aliases` (see `SETUP.md`).
 - `new-cproject.fish`, `cproj.fish`, `cj.fish`, `update-clangd.fish`,
@@ -56,18 +65,19 @@ fresh every time, never templated.
 ## What `new-cproject` does (mirrors Windows' `New-CProject`)
 
 ```
-new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui> <name> [--use-env] [--demo]
+new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui|hm_mt_raylib> <name> [--use-env] [--demo]
 new-cproject --types   # list active types, one per line, and exit
 ```
 
-1. Validates `<type>` — only `hm_mt`/`hm_mt_tui`/`hm_mt_cimgui` exist on
-   Linux right now; anything from the Windows type list still missing here
-   (`hm_mt_gui`, `hm_mt_raylib`, `std`, `std_cimgui`) errors clearly rather
-   than silently doing the wrong thing.
-2. `cp -r $PROJECTS/_scaffolds_mt_linux/$TYPE ./$NAME` — for `hm_mt_cimgui`
-   this includes `vendor/` (cimgui+GLFW), which is always copied in
-   regardless of `--use-env` (it's the scaffold's own vendored dependency,
-   not hm_core, so the live-vs-copy choice doesn't apply to it).
+1. Validates `<type>` — only `hm_mt`/`hm_mt_tui`/`hm_mt_cimgui`/
+   `hm_mt_raylib` exist on Linux right now; anything from the Windows type
+   list still missing here (`hm_mt_gui`, `std`, `std_cimgui`) errors
+   clearly rather than silently doing the wrong thing.
+2. `cp -r $PROJECTS/_scaffolds_mt_linux/$TYPE ./$NAME` — for `hm_mt_cimgui`/
+   `hm_mt_raylib` this includes `vendor/` (cimgui+GLFW, or raylib), which is
+   always copied in regardless of `--use-env` (it's the scaffold's own
+   vendored dependency, not hm_core, so the live-vs-copy choice doesn't
+   apply to it).
 3. Either copies `$HMCOREMT_ROOT/src` into `$NAME/src/_hm_core/` (default),
    or (`--use-env`) rewrites the copied `Makefile`'s `CORE :=` line to point
    straight at `$HMCOREMT_ROOT/src` — no copy, so upstream core changes just
@@ -86,8 +96,9 @@ new-cproject --types   # list active types, one per line, and exit
    `update-clangd` below, the port of Windows' `Update-ClangD`. When
    `vendor/cimgui` exists in the copied template (`hm_mt_cimgui`),
    `_hmcoremt_write_clangd` also gets `vendor/cimgui/include`,
-   `vendor/glfw/include` appended — always relative, since `vendor/` is
-   local to the project either way.
+   `vendor/glfw/include` appended; when `vendor/raylib` exists instead
+   (`hm_mt_raylib`), it gets `vendor/raylib/include` appended — always
+   relative, since `vendor/` is local to the project either way.
 6. `git init -b main && git add -A && git commit`, then `cd`s into the new
    project directory.
 
@@ -179,14 +190,41 @@ copies on two filesystems).
 ## Not ported yet (Phase 2 — GUI)
 
 `hm_mt_gui` (hm_core's own native `draw`/`render`/`ui`/`window_manager`
-stack) and `hm_mt_raylib` don't exist here. `hm_mt_cimgui` **is** done (see
-above) — it sidesteps this gap entirely rather than closing it, since
-cimgui+GLFW+OpenGL3 drive their own window/render loop and never touch
+stack) doesn't exist here. `hm_mt_cimgui` and `hm_mt_raylib` **are** done
+(see above) — both sidestep this gap entirely rather than closing it, since
+they drive their own window/render loop and never touch
 `render`/`window_manager`. `hm_mt_gui` still needs (in `_hm_core_mt`): the
 same self-include fix applied to
 `linux/window_manager/linux_window_manager.c`; X11/GL dev packages
 (`libx11-dev libgl1-mesa-dev libxext-dev libxrender-dev libfreetype-dev
-libfontconfig1-dev`). `hm_mt_raylib` needs a new Linux vendor build of
-raylib (static) — doesn't exist yet, only the Windows `.lib` does. WSLg is
-confirmed available (`DISPLAY`/`WAYLAND_DISPLAY` set) for whenever either
-happens.
+libfontconfig1-dev`). WSLg is confirmed available (`DISPLAY`/
+`WAYLAND_DISPLAY` set) for whenever this happens.
+
+**Added 2026-08-11: `hm_mt_raylib` project type — raylib 6.x (static) GUI,
+fully done and shipped.** Ported the Windows `hm_mt_raylib` scaffold's demo
+(bouncing ball + mouse cursor + keyboard palette cycling) to the current
+`entry_point(CmdLine*)` contract, same as `hm_mt_cimgui`'s port. Key facts:
+- `vendor/raylib/{include,lib}` committed; `vendor/build_vendor.sh` rebuilds
+  it (self-cleaning scratch dir) — clones raylib 6.0 and builds via its own
+  `make PLATFORM=PLATFORM_DESKTOP RAYLIB_LIBTYPE=STATIC`, no cmake/g++
+  needed (raylib is pure C, and bundles its own GLFW-equivalent internally
+  as part of the same static lib — unlike `hm_mt_cimgui`, there's only one
+  vendor lib here, not two).
+- The Windows scaffold's whole `<windows.h>` conflict dance (`NOGDI`,
+  `CloseWindow`→`HM_CloseWindow` rename, etc.) doesn't apply on Linux —
+  verified directly by diffing hm_core's macro table against raylib's/
+  raymath's declared functions and struct typedefs, not assumed. The only
+  real clash is hm_core's own `Clamp(a,x,b)` macro (`base/base_core.h`,
+  platform-independent) mangling raymath's `Clamp(float,float,float)`
+  function — `#undef Clamp` after `inc.h`, before `raylib.h`/`raymath.h`.
+- Doesn't touch hm_core's own `draw`/`render`/`ui`/`window_manager` — only
+  borrows `base`/`os`/`ext`/`log`, same as `hm_mt_cimgui`.
+- Verified for real: an actual raylib window + GL context ran (Mesa
+  Intel(R) UHD Graphics 620, OpenGL 4.6 core), via the *actual*
+  `new-cproject`/bash and fish pipelines end to end — both copy-in and
+  `--use-env` modes, both `--demo` (bouncing ball) and minimal (stub)
+  variants, all four combinations built with zero warnings and ran.
+- Wired into both `new-cproject.fish` and `new-cproject.sh` + `--types`,
+  and `update-clangd`'s vendor-include detection (both shells) — same
+  `if vendor/cimgui ... elif vendor/raylib ...` pattern in each spot that
+  previously only knew about `vendor/cimgui`.
