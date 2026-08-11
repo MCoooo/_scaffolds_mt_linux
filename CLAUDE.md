@@ -29,13 +29,21 @@ standalone script — see "Why a function, not a script" below).
   cell grid over raw-mode terminal) instead of a plain console demo.
 - `new-cproject.sh` — the project generator; also installable as
   `~/.bash_aliases` (see `SETUP.md`).
+- `new-cproject.fish`, `cproj.fish`, `cj.fish`, `update-clangd.fish`,
+  `_hmcoremt_write_clangd.fish` — fish-native port of the same generator
+  (plus its `update-clangd` companion), one function per file (fish
+  autoload requirement). Behavior is identical to the bash version; install
+  by copying into `~/.config/fish/functions/` (see `SETUP.md`) — no
+  sourcing step needed, and no function-vs-script workaround required since
+  fish functions already run in the caller's shell.
 - `SETUP.md` — fresh-machine setup instructions.
 
-Each scaffold directory has: `Makefile`, `.clangd`, `.clang-format`,
-`.gitignore`, `.gitattributes`, `CLAUDE.md` (project-root template, patched
-with the real project name at creation time), `resources/` (placeholder,
-mirrors the Windows layout — unused on Linux so far), `src/{inc.h, main.c,
-main_stub.c, _vendor/}`.
+Each scaffold directory has: `Makefile`, `.clang-format`, `.gitignore`,
+`.gitattributes`, `CLAUDE.md` (project-root template, patched with the real
+project name at creation time), `resources/` (placeholder, mirrors the
+Windows layout — unused on Linux so far), `src/{inc.h, main.c, main_stub.c,
+_vendor/}`. No `.clangd` is checked in — see step 5 below, it's generated
+fresh every time, never templated.
 
 ## What `new-cproject` does (mirrors Windows' `New-CProject`)
 
@@ -49,16 +57,41 @@ new-cproject <hm_mt|hm_mt_tui> <name> [--use-env] [--demo]
    doing the wrong thing.
 2. `cp -r $PROJECTS/_scaffolds_mt_linux/$TYPE ./$NAME`.
 3. Either copies `$HMCOREMT_ROOT/src` into `$NAME/src/_hm_core/` (default),
-   or (`--use-env`) rewrites the copied `Makefile`'s `CORE :=` line and
-   `.clangd`'s include path to point straight at `$HMCOREMT_ROOT/src` — no
-   copy, so upstream core changes just need a rebuild, not a re-run.
+   or (`--use-env`) rewrites the copied `Makefile`'s `CORE :=` line to point
+   straight at `$HMCOREMT_ROOT/src` — no copy, so upstream core changes just
+   need a rebuild, not a re-run.
 4. Patches `PROJECT_NAME` into `Makefile`/`CLAUDE.md`, and picks
    `main.c` (demo, `--demo`) vs. `main_stub.c` renamed to `main.c` (minimal,
    default) as the entry point — same "Demo vs minimal" logic as Windows.
-5. Regenerates `.clangd` with absolute paths (Windows does this via
-   `Update-ClangD`/`gen_compile_commands.ps1`; here it's inline `sed`).
+5. Writes `.clangd` from scratch (via the shared `_hmcoremt_write_clangd`
+   helper — bash function in `new-cproject.sh`, fish function in its own
+   autoloaded file) — copied-in projects get a relative core include path
+   (`src/_hm_core`, stable across moves since it travels with the project),
+   `--use-env` projects get an absolute `$HMCOREMT_ROOT/src` path (inherently
+   external to the project, so it can't be relative). `.clangd` is
+   `.gitignore`d in every scaffold on purpose — a `--use-env` project's
+   absolute path is only valid on the machine it was created on; see
+   `update-clangd` below, the port of Windows' `Update-ClangD`.
 6. `git init -b main && git add -A && git commit`, then `cd`s into the new
    project directory.
+
+### Resyncing `.clangd` after a move — `update-clangd`
+
+Windows has a separate `Update-ClangD`/`gen_compile_commands.ps1` step for
+this; the Linux port is the standalone `update-clangd` command (bash
+function in `new-cproject.sh`, fish function in `update-clangd.fish`). Run
+it from inside an existing generated project:
+
+- Copied-in projects: no-op in practice — `.clangd`'s paths are already
+  relative, so nothing is actually stale, but it's harmless to re-run.
+- `--use-env` projects: rewrites `.clangd`'s core include line against the
+  *current* `$HMCOREMT_ROOT` — needed if the project (or `$HMCOREMT_ROOT`
+  itself) moved to a different path or machine since creation, since the
+  old absolute path silently stops resolving otherwise (clangd degrades
+  quietly — no hard error, headers just stop resolving).
+
+It detects which mode a project is in by reading the `Makefile`'s
+`CORE :=` line, so no extra state/flag file is needed.
 
 ### Why a function, not a script
 
@@ -105,6 +138,25 @@ copies on two filesystems).
   **Windows** implementations — the Makefiles compile their `*_linux.c`
   siblings instead. `os_registry.c` has no Linux equivalent (dropped;
   Windows-only feature).
+- Warning suppressions (`CFLAGS` in `hm_mt`/`hm_mt_tui`'s `Makefile`) are
+  cross-checked against `_scaffolds_mt/hm_mt/build.bat`'s `/wd` list, not
+  guessed: `-Wno-unused-variable`/`-Wno-unused-but-set-variable`/
+  `-Wno-unused-parameter` are a direct match for Windows' `/wd4101`/
+  `/wd4189`/`/wd4100`. `-Wno-missing-braces`/`-Wno-initializer-overrides`
+  have no MSVC `/W3` equivalent at all — hm_core's nested-struct-literal and
+  `arena_alloc(...)`-style designated-initializer-override idioms are
+  Clang-only pedantic warnings that fire hundreds of times per build for
+  patterns MSVC doesn't diagnose. `-Wno-unused-value` covers the
+  `ProfScope`/`DeferLoop` macro (`base_profile.h`/`base_core.h`) — with no
+  profiling backend configured, `ProfBeginDynamic(...)` expands to a bare
+  `(0)`, and Clang flags the resulting comma-operator no-op; genuinely not a
+  bug (verified by reading the macro, not guessed), just not in Windows'
+  `/wd` list either — no MSVC diagnostic exists for this pattern. As of
+  2026-08-11, `make clean && make` on a full `hm_mt` build produces **0
+  warnings**. The one warning that was a real (if trivial, harmless) bug —
+  `-Wincompatible-pointer-types-discards-qualifiers` in
+  `linux/base/linux_base.c:1428` — was fixed at the source via a one-line
+  cast, not suppressed; see `_hm_core_mt/VENDORING.md` item 18.
 - `ext_keybind.c` is excluded (needs `window_manager/`, GUI-only — same as
   Windows' plain console `hm_mt` build).
 

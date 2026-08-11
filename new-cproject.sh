@@ -11,6 +11,75 @@
 export PROJECTS="$HOME/dev/c_lang"
 export HMCOREMT_ROOT="$HOME/dev/c_lang/_hm_core_mt"
 
+# Writes a complete .clangd from scratch for the project dir in $1, with the
+# hm_core include path given in $2. There is no committed template to patch
+# — hm_mt/hm_mt_tui both .gitignore .clangd on purpose, since a --use-env
+# project's correct core include path is an absolute, machine-specific path
+# that must never be committed. Pass a relative path ("src/_hm_core") for
+# copied-in projects (stays correct if the project moves) or an absolute
+# path ($HMCOREMT_ROOT/src) for --use-env projects (see update-clangd for
+# resyncing this after a project/machine move).
+_hmcoremt_write_clangd() {
+    local dest="$1" core_include="$2"
+    cat > "$dest/.clangd" <<EOF
+CompileFlags:
+  Add:
+    - -std=c11
+    - -Isrc
+    - -I$core_include
+    - -Isrc/_vendor
+    - -D_GNU_SOURCE
+    - -DBUILD_CONSOLE_INTERFACE=1
+    - -DBUILD_MULTI_TU=1
+    - -DBUILD_DEBUG=0
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
+Index:
+  Background: Build
+EOF
+}
+
+# Regenerate .clangd for the hm_core_mt project in the current directory —
+# port of the Windows Update-ClangD PowerShell function. Run this after
+# moving a project (or, for --use-env projects, after $HMCOREMT_ROOT itself
+# moved to a new path/machine) to resync .clangd's absolute paths.
+update-clangd() {
+    if [ ! -f Makefile ]; then
+        echo "[!] No Makefile in current directory - run this from inside a generated hm_core_mt project." >&2
+        return 1
+    fi
+
+    local core_line
+    core_line=$(grep -m1 '^CORE :=' Makefile)
+    if [ -z "$core_line" ]; then
+        echo "[!] Couldn't find a 'CORE :=' line in Makefile - is this really an hm_core_mt project?" >&2
+        return 1
+    fi
+
+    if [[ "$core_line" == *HMCOREMT_ROOT* ]]; then
+        if [ -z "$HMCOREMT_ROOT" ]; then
+            echo "[!] HMCOREMT_ROOT environment variable is not set." >&2
+            return 1
+        fi
+        if [ ! -d "$HMCOREMT_ROOT" ]; then
+            echo "[!] HMCOREMT_ROOT ($HMCOREMT_ROOT) does not exist." >&2
+            return 1
+        fi
+        _hmcoremt_write_clangd "$PWD" "$HMCOREMT_ROOT/src"
+        echo "[+] .clangd refreshed against live HMCOREMT_ROOT ($HMCOREMT_ROOT)"
+    else
+        if [ ! -d "src/_hm_core" ]; then
+            echo "[!] src/_hm_core not found - is this really a copied-in hm_core_mt project?" >&2
+            return 1
+        fi
+        _hmcoremt_write_clangd "$PWD" "src/_hm_core"
+        echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves, nothing was actually stale)"
+    fi
+}
+
 # Creates a new cproject based on scaffold types (type, name, [--use-env], [--demo])
 new-cproject() {
     local valid_types=(hm_mt hm_mt_tui)
@@ -80,11 +149,11 @@ new-cproject() {
 
     if [ "$use_env" -eq 1 ]; then
         # Reference hm_core live via $HMCOREMT_ROOT instead of copying it in —
-        # Makefile's CORE var and .clangd point at $HMCOREMT_ROOT/src, so
-        # picking up upstream core changes needs no re-copy, just a rebuild
-        # (make clean if a shared header changed).
+        # Makefile's CORE var points at $HMCOREMT_ROOT/src, so picking up
+        # upstream core changes needs no re-copy, just a rebuild (make clean
+        # if a shared header changed).
         sed -i "s|^CORE := src/_hm_core|CORE := \$(HMCOREMT_ROOT)/src|" "$dest/Makefile"
-        sed -i "s|- -Isrc/_hm_core|- -I$HMCOREMT_ROOT/src|" "$dest/.clangd"
+        _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src"
         if [ -f "$dest/CLAUDE.md" ]; then
             sed -i "s|@src/_hm_core/CLAUDE.md|@$HMCOREMT_ROOT/CLAUDE.md|" "$dest/CLAUDE.md"
         fi
@@ -93,10 +162,10 @@ new-cproject() {
         mkdir -p "$dest/src/_hm_core"
         cp -r "$HMCOREMT_ROOT/src/." "$dest/src/_hm_core/"
         [ -f "$HMCOREMT_ROOT/CLAUDE.md" ] && cp "$HMCOREMT_ROOT/CLAUDE.md" "$dest/src/_hm_core/CLAUDE.md"
-        sed -i "s|- -Isrc/_hm_core|- -I$dest/src/_hm_core|" "$dest/.clangd"
+        # Relative path — core is copied inside the project, so this stays
+        # correct no matter where the project is later moved.
+        _hmcoremt_write_clangd "$dest" "src/_hm_core"
     fi
-    sed -i "s|- -Isrc/_vendor|- -I$dest/src/_vendor|" "$dest/.clangd"
-    sed -i "s|- -Isrc\$|- -I$dest/src|" "$dest/.clangd"
 
     # Project root CLAUDE.md: patch PROJECT_NAME in place
     if [ -f "$dest/CLAUDE.md" ]; then

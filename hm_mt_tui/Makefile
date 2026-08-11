@@ -55,13 +55,46 @@ else
   OPT := -O2
 endif
 
-CFLAGS := -std=c11 $(OPT) -Wall $(DEFINES) $(INCLUDES) -MMD -MP
+# -Wno-missing-braces / -Wno-initializer-overrides: hm_core's idioms (nested
+# struct literals without extra braces; the arena_alloc(...)-style "defaults
+# struct + override specific fields" designated-initializer macro pattern)
+# trip these Clang-only pedantic warnings hundreds of times per build.
+# GCC/MSVC don't warn on either by default. Genuine warnings (unused vars,
+# etc.) stay live via -Wall.
+# Suppressions here are deliberately narrow and cross-checked against the
+# Windows build.bat's /wd list (see _scaffolds_mt/hm_mt/build.bat), not
+# guessed:
+#   -Wno-missing-braces / -Wno-initializer-overrides: no MSVC /W3 equivalent
+#     exists for either — hm_core's idioms (nested struct literals without
+#     extra braces; the arena_alloc(...)-style "defaults struct + override
+#     specific fields" designated-initializer macro) trip these Clang-only
+#     pedantic checks hundreds of times per build for patterns MSVC doesn't
+#     diagnose at all.
+#   -Wno-unused-variable / -Wno-unused-but-set-variable / -Wno-unused-parameter:
+#     direct match for Windows' /wd4101, /wd4189, /wd4100 — hm_core has
+#     debug/assert-only locals and callback-signature parameters that go
+#     genuinely unused throughout the vendored layers (unused-parameter
+#     isn't currently tripped by this build's source set, but will be once
+#     more of hm_core's surface is compiled — keeping it here for parity
+#     rather than waiting to notice the noise later).
+# Everything else stays live via -Wall, including in your own src/*.c.
+CFLAGS := -std=c11 $(OPT) -Wall -Wno-missing-braces -Wno-initializer-overrides -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-value $(DEFINES) $(INCLUDES) -MMD -MP
 LDFLAGS := -lpthread -ldl -lm
 
 # Object tree mirrors the source tree under $(OBJDIR) (avoids basename
 # collisions across layer directories).
 OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
+
+# Quiet by default (`CC file.c` / `LD binary`); `make V=1` shows the full
+# clang invocation per file instead. Either way, clang's own stdout/stderr
+# (warnings, errors) always prints in full — this only silences the
+# command-line echo, not diagnostics.
+ifeq ($(V),1)
+  Q :=
+else
+  Q := @
+endif
 
 .PHONY: all debug run clean
 all: $(BIN)
@@ -71,12 +104,14 @@ debug:
 
 $(BIN): $(OBJS)
 	@mkdir -p $(BINDIR)
-	$(CC) $(OBJS) -o $@ $(LDFLAGS)
+	@echo "  LD      $@"
+	$(Q)$(CC) $(OBJS) -o $@ $(LDFLAGS)
 	@echo "[+] Build successful: $@"
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "  CC      $<"
+	$(Q)$(CC) $(CFLAGS) -c $< -o $@
 
 run: all
 	@./$(BIN)
