@@ -12,10 +12,20 @@
 #            for --use-env projects (inherently external to the project, so
 #            it can only be pinned as absolute — see update-clangd for
 #            resyncing this after a project/machine move).
+# $argv[3..] = optional extra -I dirs (e.g. hm_mt_cimgui's vendor/cimgui/include,
+#              vendor/glfw/include — always relative, since vendor/ is copied
+#              into the project regardless of --use-env; only hm_core itself
+#              is ever referenced live).
 
 function _hmcoremt_write_clangd --description "Write a fresh .clangd for an hm_core_mt project (internal helper)"
     set dest $argv[1]
     set core_include $argv[2]
+    set extra_includes $argv[3..-1]
+
+    set extra_lines
+    for inc in $extra_includes
+        set extra_lines $extra_lines "    - -I$inc"
+    end
 
     printf '%s\n' \
         'CompileFlags:' \
@@ -24,6 +34,7 @@ function _hmcoremt_write_clangd --description "Write a fresh .clangd for an hm_c
         '    - -Isrc' \
         "    - -I$core_include" \
         '    - -Isrc/_vendor' \
+        $extra_lines \
         '    - -D_GNU_SOURCE' \
         '    - -DBUILD_CONSOLE_INTERFACE=1' \
         '    - -DBUILD_MULTI_TU=1' \

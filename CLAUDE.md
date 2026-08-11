@@ -27,6 +27,14 @@ standalone script — see "Why a function, not a script" below).
   threads, files, http, json/toml/ini, `tui/`, os extras) minus GUI layers.
 - `hm_mt_tui/` — same core, but `src/main.c` is a TUI app (double-buffered
   cell grid over raw-mode terminal) instead of a plain console demo.
+- `hm_mt_cimgui/` — cimgui (Dear ImGui) + GLFW + OpenGL3 GUI scaffold. Drives
+  its own window/render loop directly, borrowing only hm_core's
+  `base`/`os`/`ext`/`log` layers — does not use hm_core's own
+  `draw`/`render`/`ui`/`window_manager` stack (still unported, see "Not
+  ported yet" below). `vendor/cimgui`, `vendor/glfw` are committed static
+  libs + headers, built via `vendor/build_vendor.sh` (self-cleaning —
+  clones GLFW+cimgui source into a scratch dir and deletes it after
+  building).
 - `new-cproject.sh` — the project generator; also installable as
   `~/.bash_aliases` (see `SETUP.md`).
 - `new-cproject.fish`, `cproj.fish`, `cj.fish`, `update-clangd.fish`,
@@ -48,14 +56,18 @@ fresh every time, never templated.
 ## What `new-cproject` does (mirrors Windows' `New-CProject`)
 
 ```
-new-cproject <hm_mt|hm_mt_tui> <name> [--use-env] [--demo]
+new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui> <name> [--use-env] [--demo]
+new-cproject --types   # list active types, one per line, and exit
 ```
 
-1. Validates `<type>` — only `hm_mt`/`hm_mt_tui` exist on Linux right now;
-   anything from the Windows type list (`hm_mt_gui`, `hm_mt_cimgui`,
-   `hm_mt_raylib`, `std`, `std_cimgui`) errors clearly rather than silently
-   doing the wrong thing.
-2. `cp -r $PROJECTS/_scaffolds_mt_linux/$TYPE ./$NAME`.
+1. Validates `<type>` — only `hm_mt`/`hm_mt_tui`/`hm_mt_cimgui` exist on
+   Linux right now; anything from the Windows type list still missing here
+   (`hm_mt_gui`, `hm_mt_raylib`, `std`, `std_cimgui`) errors clearly rather
+   than silently doing the wrong thing.
+2. `cp -r $PROJECTS/_scaffolds_mt_linux/$TYPE ./$NAME` — for `hm_mt_cimgui`
+   this includes `vendor/` (cimgui+GLFW), which is always copied in
+   regardless of `--use-env` (it's the scaffold's own vendored dependency,
+   not hm_core, so the live-vs-copy choice doesn't apply to it).
 3. Either copies `$HMCOREMT_ROOT/src` into `$NAME/src/_hm_core/` (default),
    or (`--use-env`) rewrites the copied `Makefile`'s `CORE :=` line to point
    straight at `$HMCOREMT_ROOT/src` — no copy, so upstream core changes just
@@ -71,7 +83,11 @@ new-cproject <hm_mt|hm_mt_tui> <name> [--use-env] [--demo]
    external to the project, so it can't be relative). `.clangd` is
    `.gitignore`d in every scaffold on purpose — a `--use-env` project's
    absolute path is only valid on the machine it was created on; see
-   `update-clangd` below, the port of Windows' `Update-ClangD`.
+   `update-clangd` below, the port of Windows' `Update-ClangD`. When
+   `vendor/cimgui` exists in the copied template (`hm_mt_cimgui`),
+   `_hmcoremt_write_clangd` also gets `vendor/cimgui/include`,
+   `vendor/glfw/include` appended — always relative, since `vendor/` is
+   local to the project either way.
 6. `git init -b main && git add -A && git commit`, then `cd`s into the new
    project directory.
 
@@ -162,11 +178,15 @@ copies on two filesystems).
 
 ## Not ported yet (Phase 2 — GUI)
 
-`hm_mt_gui`, `hm_mt_cimgui`, `hm_mt_raylib` don't exist here. Needs (in
-`_hm_core_mt`): the same self-include fix applied to
+`hm_mt_gui` (hm_core's own native `draw`/`render`/`ui`/`window_manager`
+stack) and `hm_mt_raylib` don't exist here. `hm_mt_cimgui` **is** done (see
+above) — it sidesteps this gap entirely rather than closing it, since
+cimgui+GLFW+OpenGL3 drive their own window/render loop and never touch
+`render`/`window_manager`. `hm_mt_gui` still needs (in `_hm_core_mt`): the
+same self-include fix applied to
 `linux/window_manager/linux_window_manager.c`; X11/GL dev packages
 (`libx11-dev libgl1-mesa-dev libxext-dev libxrender-dev libfreetype-dev
-libfontconfig1-dev`); new Linux vendor builds of cimgui (GLFW+OpenGL3
-backend, static) and raylib (static) — neither exists yet, only Windows
-`.lib`s do. WSLg is confirmed available (`DISPLAY`/`WAYLAND_DISPLAY` set)
-for whenever this happens.
+libfontconfig1-dev`). `hm_mt_raylib` needs a new Linux vendor build of
+raylib (static) — doesn't exist yet, only the Windows `.lib` does. WSLg is
+confirmed available (`DISPLAY`/`WAYLAND_DISPLAY` set) for whenever either
+happens.

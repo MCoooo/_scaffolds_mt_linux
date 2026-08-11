@@ -6,13 +6,21 @@
 # just works.
 
 function new-cproject --description "Create a new hm_core_mt project from a Linux scaffold"
-    set valid_types hm_mt hm_mt_tui
-    set not_yet_ported hm_mt_gui hm_mt_cimgui hm_mt_raylib std std_cimgui
+    set valid_types hm_mt hm_mt_tui hm_mt_cimgui
+    set not_yet_ported hm_mt_gui hm_mt_raylib std std_cimgui
+
+    if contains -- --types $argv
+        for t in $valid_types
+            echo $t
+        end
+        return 0
+    end
 
     if test (count $argv) -lt 2
         echo "Usage: new-cproject <type> <name> [--use-env] [--demo]" >&2
+        echo "       new-cproject --types" >&2
         echo "Types: $valid_types" >&2
-        echo "(GUI/raylib/cimgui/std types not yet ported to Linux)" >&2
+        echo "(GUI/raylib/std types not yet ported to Linux)" >&2
         return 1
     end
 
@@ -70,6 +78,15 @@ function new-cproject --description "Create a new hm_core_mt project from a Linu
     echo "Creating '$name' ($type)..."
     cp -r "$scaffolds/$type" "$dest"
 
+    # vendor/ (cimgui+GLFW, when present) is copied in as part of the
+    # template regardless of --use-env — it's the scaffold's own vendored
+    # dependency, not hm_core, so the live-vs-copy choice doesn't apply to
+    # it. Its include dirs still need to land in .clangd though.
+    set extra_includes
+    if test -d "$dest/vendor/cimgui"
+        set extra_includes vendor/cimgui/include vendor/glfw/include
+    end
+
     if test $use_env -eq 1
         # Reference hm_core live via $HMCOREMT_ROOT instead of copying it in —
         # Makefile's CORE var points at $HMCOREMT_ROOT/src, so picking up
@@ -82,7 +99,7 @@ function new-cproject --description "Create a new hm_core_mt project from a Linu
         # rather than committed: a baked-in absolute path from machine A
         # would silently be wrong on machine B.
         sed -i "s|^CORE := src/_hm_core|CORE := \$(HMCOREMT_ROOT)/src|" "$dest/Makefile"
-        _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src"
+        _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src" $extra_includes
         if test -f "$dest/CLAUDE.md"
             sed -i "s|@src/_hm_core/CLAUDE.md|@$HMCOREMT_ROOT/CLAUDE.md|" "$dest/CLAUDE.md"
         end
@@ -94,7 +111,7 @@ function new-cproject --description "Create a new hm_core_mt project from a Linu
         # Relative path — core is copied inside the project, so this stays
         # correct no matter where the project is later moved. No absolute
         # path, no staleness, update-clangd is a no-op here.
-        _hmcoremt_write_clangd "$dest" "src/_hm_core"
+        _hmcoremt_write_clangd "$dest" "src/_hm_core" $extra_includes
     end
 
     # Project root CLAUDE.md: patch PROJECT_NAME in place

@@ -16,6 +16,13 @@ function update-clangd --description "Regenerate .clangd for the hm_core_mt proj
         return 1
     end
 
+    # vendor/ (cimgui+GLFW, when present) is always local to the project,
+    # copy-in or --use-env alike — same reasoning as new-cproject.
+    set extra_includes
+    if test -d vendor/cimgui
+        set extra_includes vendor/cimgui/include vendor/glfw/include
+    end
+
     if string match -q '*HMCOREMT_ROOT*' -- $core_line
         if test -z "$HMCOREMT_ROOT"
             echo "[!] HMCOREMT_ROOT environment variable is not set." >&2
@@ -25,14 +32,14 @@ function update-clangd --description "Regenerate .clangd for the hm_core_mt proj
             echo "[!] HMCOREMT_ROOT ($HMCOREMT_ROOT) does not exist." >&2
             return 1
         end
-        _hmcoremt_write_clangd "$PWD" "$HMCOREMT_ROOT/src"
+        _hmcoremt_write_clangd "$PWD" "$HMCOREMT_ROOT/src" $extra_includes
         echo "[+] .clangd refreshed against live HMCOREMT_ROOT ($HMCOREMT_ROOT)"
     else
         if not test -d "src/_hm_core"
             echo "[!] src/_hm_core not found - is this really a copied-in hm_core_mt project?" >&2
             return 1
         end
-        _hmcoremt_write_clangd "$PWD" "src/_hm_core"
+        _hmcoremt_write_clangd "$PWD" "src/_hm_core" $extra_includes
         echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves, nothing was actually stale)"
     end
 end

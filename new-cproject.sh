@@ -12,15 +12,24 @@ export PROJECTS="$HOME/dev/c_lang"
 export HMCOREMT_ROOT="$HOME/dev/c_lang/_hm_core_mt"
 
 # Writes a complete .clangd from scratch for the project dir in $1, with the
-# hm_core include path given in $2. There is no committed template to patch
-# — hm_mt/hm_mt_tui both .gitignore .clangd on purpose, since a --use-env
-# project's correct core include path is an absolute, machine-specific path
-# that must never be committed. Pass a relative path ("src/_hm_core") for
-# copied-in projects (stays correct if the project moves) or an absolute
-# path ($HMCOREMT_ROOT/src) for --use-env projects (see update-clangd for
-# resyncing this after a project/machine move).
+# hm_core include path given in $2, plus any extra -I dirs passed from $3
+# onward (e.g. hm_mt_cimgui's vendor/cimgui/include, vendor/glfw/include —
+# always relative, since vendor/ is copied into the project regardless of
+# --use-env; only hm_core itself is ever referenced live). There is no
+# committed template to patch — hm_mt/hm_mt_tui/hm_mt_cimgui all .gitignore
+# .clangd on purpose, since a --use-env project's correct core include path
+# is an absolute, machine-specific path that must never be committed. Pass a
+# relative path ("src/_hm_core") for copied-in projects (stays correct if
+# the project moves) or an absolute path ($HMCOREMT_ROOT/src) for --use-env
+# projects (see update-clangd for resyncing this after a project/machine move).
 _hmcoremt_write_clangd() {
     local dest="$1" core_include="$2"
+    shift 2
+    local extra_lines=""
+    for inc in "$@"; do
+        extra_lines="${extra_lines}    - -I${inc}
+"
+    done
     cat > "$dest/.clangd" <<EOF
 CompileFlags:
   Add:
@@ -28,7 +37,7 @@ CompileFlags:
     - -Isrc
     - -I$core_include
     - -Isrc/_vendor
-    - -D_GNU_SOURCE
+${extra_lines}    - -D_GNU_SOURCE
     - -DBUILD_CONSOLE_INTERFACE=1
     - -DBUILD_MULTI_TU=1
     - -DBUILD_DEBUG=0
@@ -59,6 +68,13 @@ update-clangd() {
         return 1
     fi
 
+    # vendor/ (cimgui+GLFW, when present) is always local to the project,
+    # copy-in or --use-env alike — same reasoning as new-cproject.
+    local extra_includes=()
+    if [ -d "vendor/cimgui" ]; then
+        extra_includes=(vendor/cimgui/include vendor/glfw/include)
+    fi
+
     if [[ "$core_line" == *HMCOREMT_ROOT* ]]; then
         if [ -z "$HMCOREMT_ROOT" ]; then
             echo "[!] HMCOREMT_ROOT environment variable is not set." >&2
@@ -68,27 +84,35 @@ update-clangd() {
             echo "[!] HMCOREMT_ROOT ($HMCOREMT_ROOT) does not exist." >&2
             return 1
         fi
-        _hmcoremt_write_clangd "$PWD" "$HMCOREMT_ROOT/src"
+        _hmcoremt_write_clangd "$PWD" "$HMCOREMT_ROOT/src" "${extra_includes[@]}"
         echo "[+] .clangd refreshed against live HMCOREMT_ROOT ($HMCOREMT_ROOT)"
     else
         if [ ! -d "src/_hm_core" ]; then
             echo "[!] src/_hm_core not found - is this really a copied-in hm_core_mt project?" >&2
             return 1
         fi
-        _hmcoremt_write_clangd "$PWD" "src/_hm_core"
+        _hmcoremt_write_clangd "$PWD" "src/_hm_core" "${extra_includes[@]}"
         echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves, nothing was actually stale)"
     fi
 }
 
 # Creates a new cproject based on scaffold types (type, name, [--use-env], [--demo])
 new-cproject() {
-    local valid_types=(hm_mt hm_mt_tui)
-    local not_yet_ported=(hm_mt_gui hm_mt_cimgui hm_mt_raylib std std_cimgui)
+    local valid_types=(hm_mt hm_mt_tui hm_mt_cimgui)
+    local not_yet_ported=(hm_mt_gui hm_mt_raylib std std_cimgui)
+
+    for arg in "$@"; do
+        if [ "$arg" = "--types" ]; then
+            printf '%s\n' "${valid_types[@]}"
+            return 0
+        fi
+    done
 
     if [ $# -lt 2 ]; then
         echo "Usage: new-cproject <type> <name> [--use-env] [--demo]" >&2
+        echo "       new-cproject --types" >&2
         echo "Types: ${valid_types[*]}" >&2
-        echo "(GUI/raylib/cimgui/std types not yet ported to Linux)" >&2
+        echo "(GUI/raylib/std types not yet ported to Linux)" >&2
         return 1
     fi
 
@@ -147,13 +171,22 @@ new-cproject() {
     echo "Creating '$name' ($type)..."
     cp -r "$scaffolds/$type" "$dest"
 
+    # vendor/ (cimgui+GLFW, when present) is copied in as part of the
+    # template regardless of --use-env — it's the scaffold's own vendored
+    # dependency, not hm_core, so the live-vs-copy choice doesn't apply to
+    # it. Its include dirs still need to land in .clangd though.
+    local extra_includes=()
+    if [ -d "$dest/vendor/cimgui" ]; then
+        extra_includes=(vendor/cimgui/include vendor/glfw/include)
+    fi
+
     if [ "$use_env" -eq 1 ]; then
         # Reference hm_core live via $HMCOREMT_ROOT instead of copying it in —
         # Makefile's CORE var points at $HMCOREMT_ROOT/src, so picking up
         # upstream core changes needs no re-copy, just a rebuild (make clean
         # if a shared header changed).
         sed -i "s|^CORE := src/_hm_core|CORE := \$(HMCOREMT_ROOT)/src|" "$dest/Makefile"
-        _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src"
+        _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src" "${extra_includes[@]}"
         if [ -f "$dest/CLAUDE.md" ]; then
             sed -i "s|@src/_hm_core/CLAUDE.md|@$HMCOREMT_ROOT/CLAUDE.md|" "$dest/CLAUDE.md"
         fi
@@ -164,7 +197,7 @@ new-cproject() {
         [ -f "$HMCOREMT_ROOT/CLAUDE.md" ] && cp "$HMCOREMT_ROOT/CLAUDE.md" "$dest/src/_hm_core/CLAUDE.md"
         # Relative path — core is copied inside the project, so this stays
         # correct no matter where the project is later moved.
-        _hmcoremt_write_clangd "$dest" "src/_hm_core"
+        _hmcoremt_write_clangd "$dest" "src/_hm_core" "${extra_includes[@]}"
     fi
 
     # Project root CLAUDE.md: patch PROJECT_NAME in place

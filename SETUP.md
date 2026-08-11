@@ -117,7 +117,8 @@ logging) and end with `done.`.
 ## Usage
 
 ```sh
-new-cproject <hm_mt|hm_mt_tui> <name> [--use-env] [--demo]
+new-cproject <hm_mt|hm_mt_tui|hm_mt_cimgui> <name> [--use-env] [--demo]
+new-cproject --types   # list active types, one per line, and exit
 # aliases: cproj, cj
 ```
 
@@ -126,6 +127,9 @@ new-cproject <hm_mt|hm_mt_tui> <name> [--use-env] [--demo]
 - `--use-env` — reference `$HMCOREMT_ROOT/src` live instead of copying it
   into `src/_hm_core/`; upstream core changes are picked up on next rebuild
   (no re-run needed). Without it, the project gets a frozen snapshot.
+  `hm_mt_cimgui`'s `vendor/` (cimgui + GLFW) is unaffected either way — it's
+  always copied into the project, since it's the scaffold's own vendored
+  dependency, not hm_core.
 
 Inside a generated project: `make` / `make debug` / `make run` / `make clean`.
 
@@ -143,8 +147,11 @@ Windows' `Update-ClangD`.
 
 ## Known gaps
 
-- Only `hm_mt` (console) and `hm_mt_tui` (terminal UI) exist. GUI scaffolds
-  aren't ported — see this repo's `CLAUDE.md` "Not ported yet" section.
+- `hm_mt` (console), `hm_mt_tui` (terminal UI), and `hm_mt_cimgui` (cimgui +
+  GLFW + OpenGL3 GUI) exist. hm_core's own native GUI stack
+  (`draw`/`render`/`ui`/`window_manager`) isn't ported to Linux — see this
+  repo's `CLAUDE.md` "Not ported yet" section. `hm_mt_cimgui` doesn't touch
+  that stack at all, so it isn't blocked on it.
 - `make debug`/`make` both work but there's no `compile_commands.json`
   generation step yet (the `.clangd` generated at project-creation time,
   see above, is what `clangd` actually uses — this is sufficient, just
