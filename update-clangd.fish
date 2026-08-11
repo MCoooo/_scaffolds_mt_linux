@@ -1,10 +1,30 @@
 # update-clangd.fish — fish port of the Windows Update-ClangD PowerShell
-# function. Run from inside an already-generated hm_core_mt project to
-# resync its .clangd after the project (or, for --use-env projects,
-# $HMCOREMT_ROOT) has moved to a new path or machine. See CLAUDE.md for why
-# .clangd can't just be committed once and forgotten.
+# function. Install: cp update-clangd.fish _hmcoremt_write_clangd.fish ~/.config/fish/functions/
+# Or run setup.sh to install everything at once.
 
 function update-clangd --description "Regenerate .clangd for the hm_core_mt project in the current directory"
+    if contains -- --help $argv
+        echo "update-clangd — regenerate .clangd for an hm_core_mt project"
+        echo ""
+        echo "WHAT:"
+        echo "  Rewrites .clangd in the current project directory. .clangd tells"
+        echo "  clangd which include paths and defines to use, and is gitignored"
+        echo "  (never committed) because --use-env projects bake in an absolute"
+        echo "  path to \$HMCOREMT_ROOT that is machine-specific."
+        echo ""
+        echo "WHEN:"
+        echo "  - After cloning a --use-env project on a new machine: the baked-in"
+        echo "    path to \$HMCOREMT_ROOT only exists on the machine it was created on."
+        echo "  - If \$HMCOREMT_ROOT itself moved to a different path."
+        echo "  - Copied-in projects use relative paths that never go stale — only"
+        echo "    run if clangd is showing unexplained unresolved-include errors."
+        echo "  (new-cproject already runs this automatically at creation time.)"
+        echo ""
+        echo "USAGE:"
+        echo "  cd my-project && update-clangd"
+        return 0
+    end
+
     if not test -f Makefile
         echo "[!] No Makefile in current directory - run this from inside a generated hm_core_mt project." >&2
         return 1
@@ -41,7 +61,7 @@ function update-clangd --description "Regenerate .clangd for the hm_core_mt proj
             echo "[!] src/_hm_core not found - is this really a copied-in hm_core_mt project?" >&2
             return 1
         end
-        _hmcoremt_write_clangd "$PWD" "src/_hm_core" $extra_includes
-        echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves, nothing was actually stale)"
+        _hmcoremt_write_clangd "$PWD" "_hm_core" $extra_includes
+        echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves)"
     end
 end

@@ -1,27 +1,26 @@
-# new-cproject.sh — Linux port of the Windows New-CProject PowerShell
-# function. See SETUP.md for installation. Source this file, don't execute
-# it (it defines a shell function + exports + aliases in your interactive
-# shell, nothing here does anything on its own).
+# new-cproject.sh — Linux bash/zsh port of the Windows New-CProject PowerShell
+# function. Source this file, don't execute it (it defines shell functions that
+# must run in your interactive shell so the trailing `cd` works).
 #
-# It's a *function*, not a standalone script on PATH, because PowerShell's
-# New-CProject ends with Set-Location $dest, leaving you inside the new
-# project — a script run in a subprocess can't cd its parent shell, so this
-# has to run in-process via `source`.
+# Install: run setup.sh, or add to ~/.bash_aliases / ~/.zshrc:
+#   . "/path/to/_scaffolds_mt_linux/new-cproject.sh"
 
-export PROJECTS="$HOME/dev/c_lang"
-export HMCOREMT_ROOT="$HOME/dev/c_lang/_hm_core_mt"
+# PROJECTS and HMCOREMT_ROOT: use whatever is already in the environment
+# (e.g. set by setup.sh), falling back to the conventional paths.
+export PROJECTS="${PROJECTS:-$HOME/dev/c_lang}"
+export HMCOREMT_ROOT="${HMCOREMT_ROOT:-$HOME/dev/c_lang/_hm_core_mt}"
 
-# Writes a complete .clangd from scratch for the project dir in $1, with the
-# hm_core include path given in $2, plus any extra -I dirs passed from $3
-# onward (e.g. hm_mt_cimgui's vendor/cimgui/include, vendor/glfw/include —
-# always relative, since vendor/ is copied into the project regardless of
-# --use-env; only hm_core itself is ever referenced live). There is no
-# committed template to patch — hm_mt/hm_mt_tui/hm_mt_cimgui all .gitignore
-# .clangd on purpose, since a --use-env project's correct core include path
-# is an absolute, machine-specific path that must never be committed. Pass a
-# relative path ("src/_hm_core") for copied-in projects (stays correct if
-# the project moves) or an absolute path ($HMCOREMT_ROOT/src) for --use-env
-# projects (see update-clangd for resyncing this after a project/machine move).
+# ---------------------------------------------------------------------------
+# _hmcoremt_write_clangd <dest> <core_include> [extra_include...]
+#
+# Writes .clangd from scratch. core_include for copied-in projects should
+# be "_hm_core" (relative to src/), for --use-env an absolute path.
+#
+# WHY paths are relative to src/:
+#   clangd uses the source file's own directory as working dir for its
+#   fallback command (no compile_commands.json). -Isrc/_hm_core from src/
+#   expands to src/src/_hm_core — wrong. -I_hm_core from src/ is correct.
+# ---------------------------------------------------------------------------
 _hmcoremt_write_clangd() {
     local dest="$1" core_include="$2"
     shift 2
@@ -34,9 +33,9 @@ _hmcoremt_write_clangd() {
 CompileFlags:
   Add:
     - -std=c11
-    - -Isrc
+    - -I.
     - -I$core_include
-    - -Isrc/_vendor
+    - -I_vendor
 ${extra_lines}    - -D_GNU_SOURCE
     - -DBUILD_CONSOLE_INTERFACE=1
     - -DBUILD_MULTI_TU=1
@@ -51,11 +50,48 @@ Index:
 EOF
 }
 
-# Regenerate .clangd for the hm_core_mt project in the current directory —
-# port of the Windows Update-ClangD PowerShell function. Run this after
-# moving a project (or, for --use-env projects, after $HMCOREMT_ROOT itself
-# moved to a new path/machine) to resync .clangd's absolute paths.
+# ---------------------------------------------------------------------------
+# update-clangd
+#
+# WHAT:  Regenerates .clangd in the current hm_core_mt project. .clangd is
+#        gitignored because --use-env projects bake in an absolute path to
+#        $HMCOREMT_ROOT that is machine-specific.
+#
+# WHEN:  - After cloning a --use-env project on a new machine: the baked-in
+#          path to $HMCOREMT_ROOT only exists on the machine it was created on.
+#        - If $HMCOREMT_ROOT itself moved to a different path.
+#        - Copied-in projects use relative paths that never go stale — only
+#          run if clangd is showing unexplained unresolved-include errors.
+#        (new-cproject already runs this automatically at creation time.)
+#
+# USAGE: cd my-project && update-clangd
+#        update-clangd --help
+# ---------------------------------------------------------------------------
 update-clangd() {
+    if [ "${1:-}" = "--help" ]; then
+        cat <<'EOF'
+update-clangd — regenerate .clangd for an hm_core_mt project
+
+WHAT:
+  Rewrites .clangd in the current project directory. .clangd tells
+  clangd which include paths and defines to use, and is gitignored
+  (never committed) because --use-env projects bake in an absolute
+  path to $HMCOREMT_ROOT that is machine-specific.
+
+WHEN:
+  - After cloning a --use-env project on a new machine: the baked-in
+    path to $HMCOREMT_ROOT only exists on the machine it was created on.
+  - If $HMCOREMT_ROOT itself moved to a different path.
+  - Copied-in projects use relative paths that never go stale — only
+    run if clangd is showing unexplained unresolved-include errors.
+  (new-cproject already runs this automatically at creation time.)
+
+USAGE:
+  cd my-project && update-clangd
+EOF
+        return 0
+    fi
+
     if [ ! -f Makefile ]; then
         echo "[!] No Makefile in current directory - run this from inside a generated hm_core_mt project." >&2
         return 1
@@ -68,8 +104,6 @@ update-clangd() {
         return 1
     fi
 
-    # vendor/ (cimgui+GLFW, or raylib, when present) is always local to the
-    # project, copy-in or --use-env alike — same reasoning as new-cproject.
     local extra_includes=()
     if [ -d "vendor/cimgui" ]; then
         extra_includes=(vendor/cimgui/include vendor/glfw/include)
@@ -93,15 +127,65 @@ update-clangd() {
             echo "[!] src/_hm_core not found - is this really a copied-in hm_core_mt project?" >&2
             return 1
         fi
-        _hmcoremt_write_clangd "$PWD" "src/_hm_core" "${extra_includes[@]}"
-        echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves, nothing was actually stale)"
+        _hmcoremt_write_clangd "$PWD" "_hm_core" "${extra_includes[@]}"
+        echo "[+] .clangd refreshed (copied-in core, relative paths - safe across moves)"
     fi
 }
 
-# Creates a new cproject based on scaffold types (type, name, [--use-env], [--demo])
+# ---------------------------------------------------------------------------
+# new-cproject <type> <name> [--use-env] [--demo]
+#
+# WHAT:  Creates a new hm_core_mt C project from a scaffold template.
+#        Copies the scaffold, links or copies hm_core, generates .clangd
+#        so clangd works out of the box, runs git init, and cd's in.
+#
+# WHEN:  Whenever you start a new C project using the hm_core_mt library.
+#
+# USAGE: new-cproject <type> <name> [--use-env] [--demo]
+#        new-cproject --types
+#        new-cproject --help
+# ---------------------------------------------------------------------------
 new-cproject() {
     local valid_types=(hm_mt hm_mt_tui hm_mt_cimgui hm_mt_raylib)
     local not_yet_ported=(hm_mt_gui std std_cimgui)
+
+    if [ "${1:-}" = "--help" ]; then
+        cat <<'EOF'
+new-cproject — create a new hm_core_mt C project from a scaffold
+
+WHAT:
+  Copies a scaffold template, links or copies hm_core into it,
+  generates .clangd so clangd works out of the box, runs git init,
+  and cd's into the new project directory.
+
+WHEN:
+  Whenever you start a new C project using the hm_core_mt library.
+
+USAGE:
+  new-cproject <type> <name> [--use-env] [--demo]
+  new-cproject --types    list available scaffold types
+  new-cproject --help
+
+TYPES:
+  hm_mt          console (arenas, strings, threads, files, logging)
+  hm_mt_tui      terminal UI (adds tui_core on top of hm_mt)
+  hm_mt_cimgui   GUI via cimgui + GLFW + OpenGL3
+  hm_mt_raylib   GUI via raylib
+
+OPTIONS:
+  --demo      Keep the full demo main.c (showcases arenas, strings,
+              threads, etc.). Default is a minimal stub.
+  --use-env   Reference $HMCOREMT_ROOT live instead of copying hm_core
+              into src/_hm_core. Picks up upstream core changes on next
+              rebuild. .clangd uses an absolute path — run update-clangd
+              after cloning on a new machine or if $HMCOREMT_ROOT moves.
+              Without --use-env, hm_core is a frozen snapshot inside the
+              project; .clangd paths are relative and never go stale.
+
+ALIASES: cproj, cj
+EOF
+        return 0
+    fi
 
     for arg in "$@"; do
         if [ "$arg" = "--types" ]; then
@@ -112,9 +196,8 @@ new-cproject() {
 
     if [ $# -lt 2 ]; then
         echo "Usage: new-cproject <type> <name> [--use-env] [--demo]" >&2
+        echo "       new-cproject --help" >&2
         echo "       new-cproject --types" >&2
-        echo "Types: ${valid_types[*]}" >&2
-        echo "(hm_mt_gui/std/std_cimgui types not yet ported to Linux)" >&2
         return 1
     fi
 
@@ -146,37 +229,28 @@ new-cproject() {
     fi
 
     if [ -z "$PROJECTS" ]; then
-        echo "[!] PROJECTS environment variable is not set." >&2
-        return 1
+        echo "[!] PROJECTS environment variable is not set." >&2; return 1
     fi
     if [ -z "$HMCOREMT_ROOT" ]; then
-        echo "[!] HMCOREMT_ROOT environment variable is not set." >&2
-        return 1
+        echo "[!] HMCOREMT_ROOT environment variable is not set." >&2; return 1
     fi
     if [ ! -d "$HMCOREMT_ROOT" ]; then
-        echo "[!] HMCOREMT_ROOT ($HMCOREMT_ROOT) does not exist." >&2
-        return 1
+        echo "[!] HMCOREMT_ROOT ($HMCOREMT_ROOT) does not exist." >&2; return 1
     fi
 
     local scaffolds="$PROJECTS/_scaffolds_mt_linux"
     local dest="$PWD/$name"
 
     if [ -e "$dest" ]; then
-        echo "[!] '$dest' already exists." >&2
-        return 1
+        echo "[!] '$dest' already exists." >&2; return 1
     fi
     if [ ! -d "$scaffolds/$type" ]; then
-        echo "[!] Scaffold not found: $scaffolds/$type" >&2
-        return 1
+        echo "[!] Scaffold not found: $scaffolds/$type" >&2; return 1
     fi
 
     echo "Creating '$name' ($type)..."
     cp -r "$scaffolds/$type" "$dest"
 
-    # vendor/ (cimgui+GLFW, or raylib, when present) is copied in as part
-    # of the template regardless of --use-env — it's the scaffold's own
-    # vendored dependency, not hm_core, so the live-vs-copy choice doesn't
-    # apply to it. Its include dirs still need to land in .clangd though.
     local extra_includes=()
     if [ -d "$dest/vendor/cimgui" ]; then
         extra_includes=(vendor/cimgui/include vendor/glfw/include)
@@ -185,10 +259,6 @@ new-cproject() {
     fi
 
     if [ "$use_env" -eq 1 ]; then
-        # Reference hm_core live via $HMCOREMT_ROOT instead of copying it in —
-        # Makefile's CORE var points at $HMCOREMT_ROOT/src, so picking up
-        # upstream core changes needs no re-copy, just a rebuild (make clean
-        # if a shared header changed).
         sed -i "s|^CORE := src/_hm_core|CORE := \$(HMCOREMT_ROOT)/src|" "$dest/Makefile"
         _hmcoremt_write_clangd "$dest" "$HMCOREMT_ROOT/src" "${extra_includes[@]}"
         if [ -f "$dest/CLAUDE.md" ]; then
@@ -199,18 +269,17 @@ new-cproject() {
         mkdir -p "$dest/src/_hm_core"
         cp -r "$HMCOREMT_ROOT/src/." "$dest/src/_hm_core/"
         [ -f "$HMCOREMT_ROOT/CLAUDE.md" ] && cp "$HMCOREMT_ROOT/CLAUDE.md" "$dest/src/_hm_core/CLAUDE.md"
-        # Relative path — core is copied inside the project, so this stays
-        # correct no matter where the project is later moved.
-        _hmcoremt_write_clangd "$dest" "src/_hm_core" "${extra_includes[@]}"
+        # Paths relative to src/ — clangd's fallback runs from the source
+        # file's directory, not the project root, so _hm_core resolves to
+        # src/_hm_core correctly from that working directory.
+        _hmcoremt_write_clangd "$dest" "_hm_core" "${extra_includes[@]}"
     fi
 
-    # Project root CLAUDE.md: patch PROJECT_NAME in place
     if [ -f "$dest/CLAUDE.md" ]; then
         sed -i "s/PROJECT_NAME/$name/g" "$dest/CLAUDE.md"
         echo "[+] Created CLAUDE.md"
     fi
 
-    # Demo vs minimal entry point
     if [ "$demo" -eq 1 ]; then
         rm -f "$dest/src/main_stub.c"
     else
@@ -220,10 +289,8 @@ new-cproject() {
         fi
     fi
 
-    # Patch PROJECT_NAME in Makefile
     sed -i "s/^PROJECT_NAME := my_project/PROJECT_NAME := $name/" "$dest/Makefile"
 
-    # Git init
     (
         cd "$dest"
         git init -q -b main
