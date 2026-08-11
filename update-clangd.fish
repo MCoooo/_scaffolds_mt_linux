@@ -16,11 +16,13 @@ function update-clangd --description "Regenerate .clangd for the hm_core_mt proj
         return 1
     end
 
-    # vendor/ (cimgui+GLFW, when present) is always local to the project,
-    # copy-in or --use-env alike — same reasoning as new-cproject.
+    # vendor/ (cimgui+GLFW, or raylib, when present) is always local to the
+    # project, copy-in or --use-env alike — same reasoning as new-cproject.
     set extra_includes
     if test -d vendor/cimgui
         set extra_includes vendor/cimgui/include vendor/glfw/include
+    else if test -d vendor/raylib
+        set extra_includes vendor/raylib/include
     end
 
     if string match -q '*HMCOREMT_ROOT*' -- $core_line

@@ -68,11 +68,13 @@ update-clangd() {
         return 1
     fi
 
-    # vendor/ (cimgui+GLFW, when present) is always local to the project,
-    # copy-in or --use-env alike — same reasoning as new-cproject.
+    # vendor/ (cimgui+GLFW, or raylib, when present) is always local to the
+    # project, copy-in or --use-env alike — same reasoning as new-cproject.
     local extra_includes=()
     if [ -d "vendor/cimgui" ]; then
         extra_includes=(vendor/cimgui/include vendor/glfw/include)
+    elif [ -d "vendor/raylib" ]; then
+        extra_includes=(vendor/raylib/include)
     fi
 
     if [[ "$core_line" == *HMCOREMT_ROOT* ]]; then
@@ -98,8 +100,8 @@ update-clangd() {
 
 # Creates a new cproject based on scaffold types (type, name, [--use-env], [--demo])
 new-cproject() {
-    local valid_types=(hm_mt hm_mt_tui hm_mt_cimgui)
-    local not_yet_ported=(hm_mt_gui hm_mt_raylib std std_cimgui)
+    local valid_types=(hm_mt hm_mt_tui hm_mt_cimgui hm_mt_raylib)
+    local not_yet_ported=(hm_mt_gui std std_cimgui)
 
     for arg in "$@"; do
         if [ "$arg" = "--types" ]; then
@@ -112,7 +114,7 @@ new-cproject() {
         echo "Usage: new-cproject <type> <name> [--use-env] [--demo]" >&2
         echo "       new-cproject --types" >&2
         echo "Types: ${valid_types[*]}" >&2
-        echo "(GUI/raylib/std types not yet ported to Linux)" >&2
+        echo "(hm_mt_gui/std/std_cimgui types not yet ported to Linux)" >&2
         return 1
     fi
 
@@ -171,13 +173,15 @@ new-cproject() {
     echo "Creating '$name' ($type)..."
     cp -r "$scaffolds/$type" "$dest"
 
-    # vendor/ (cimgui+GLFW, when present) is copied in as part of the
-    # template regardless of --use-env — it's the scaffold's own vendored
-    # dependency, not hm_core, so the live-vs-copy choice doesn't apply to
-    # it. Its include dirs still need to land in .clangd though.
+    # vendor/ (cimgui+GLFW, or raylib, when present) is copied in as part
+    # of the template regardless of --use-env — it's the scaffold's own
+    # vendored dependency, not hm_core, so the live-vs-copy choice doesn't
+    # apply to it. Its include dirs still need to land in .clangd though.
     local extra_includes=()
     if [ -d "$dest/vendor/cimgui" ]; then
         extra_includes=(vendor/cimgui/include vendor/glfw/include)
+    elif [ -d "$dest/vendor/raylib" ]; then
+        extra_includes=(vendor/raylib/include)
     fi
 
     if [ "$use_env" -eq 1 ]; then
