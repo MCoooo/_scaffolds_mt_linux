@@ -1,0 +1,24 @@
+bin/
+obj/
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.obj
+*.o
+*.d
+*.out
+.cache/
+.clangd
+compile_commands.json
+compile_flags.txt
+.vscode/
+*.swp
+.netrwhist
+tags
+.DS_Store
+Thumbs.db
+
+# vendor/build_vendor.sh's own scratch dir — self-deletes on success, but
+# ignore it in case a run is interrupted mid-build.
+vendor/_build_tmp/
